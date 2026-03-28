@@ -34,7 +34,7 @@ float eprev = 0.0;
 float eintegral = 0.0;
 float dedt = 0.0;
 float u = 0;
-float kp = 1.2; // Ajusta estos valores
+float kp = 2.0; // Ajusta estos valores 1.2
 float kd = 0.04;
 float ki = 0.005;
 float deltaT = 0.0;
@@ -53,8 +53,11 @@ float step = 0;
 void setup() 
 {
   Serial.begin(115200); // 9600 es muy lento para graficar PID
+  //Wire.setClock(100000); // safest
   Wire.begin();
-  
+  //Wire.begin(32, 33);   // SDA = 32, SCL = 33
+  //Wire.setClock(100000);
+
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   ledcAttach(IN1, 5000, 8);
@@ -79,6 +82,7 @@ void loop()
     lastUpdate = now;
 
     // 1. LEER POSICIÓN Y ACUMULAR
+    uint16_t raw = readRawAngle(); 
     float current_pos = readAngleDegrees();
     float deltapos = current_pos - prev_pos;
 
@@ -103,13 +107,14 @@ void loop()
 
     // Graficar
     //Serial.print(target); Serial.print(",");
-    //Serial.print(totalpos); Serial.print(",");
+    //Serial.println(totalpos); //Serial.print(",");
     //Serial.print(posx);// Serial.print(",");
     //Serial.println(e);
     //Serial.print(e); Serial.print(","); Serial.print(dedt);Serial.print(","); Serial.println(eintegral);
 
     //For matlab
     Serial.println(posx);
+    //Serial.println(raw);
   }
 
   if (millis() - stepTimer > 250)//1 second = 1000 ms 
@@ -155,9 +160,31 @@ float readAngleDegrees()
   return prev_pos; // Retorna la última si falla la lectura
 }
 
+uint16_t readRawAngle() 
+{
+  Wire.beginTransmission(AS5600_ADDRESS);
+  Wire.write(AS5600_RAW_ANGLE);
+
+  if (Wire.endTransmission(false) != 0) {
+    return 0xFFFF; // error flag
+  }
+
+  uint8_t n = Wire.requestFrom(AS5600_ADDRESS, 2);
+
+  if (n != 2) {
+    return 0xFFFF; // error flag
+  }
+
+  uint16_t raw = (Wire.read() << 8) | Wire.read();
+
+  return (raw & 0x0FFF); // 12-bit value (0–4095)
+}
+
 float pid(float setpoint, float measurement, float dt)
 {
     e = setpoint - measurement;
+
+    if (fabs(e) < 1.5) e = 0;
 
     // --- Derivative ---
     static float dedtF = 0;
@@ -181,8 +208,9 @@ float pid(float setpoint, float measurement, float dt)
     if (u < -255) u = -255;
 
     // --- Deadband ---
-    if (fabs(u) < 1.5) u = 0;
+    if (fabs(u) < 5) u = 0;
 
+    
     // --- Save state ---
     eprev = e;
 
