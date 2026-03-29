@@ -47,6 +47,7 @@ float target = 0.0;
 #define S1 12
 #define ON 1
 #define OFF 0
+#define PRESS 255
 
 // Notes (position placeholders)
 #define A4 10
@@ -69,8 +70,11 @@ enum MOTOR_STATE
 
 enum MOTOR_STATE motorState = READY;
 
+
+/*
 const double testArray[][3] =
 {
+  // {No. of Beats, Note, Strength}
   {1, E4, 1},
   {1, E4, 1},
   {1, F4, 1},
@@ -88,6 +92,16 @@ const double testArray[][3] =
   {2, D4, 1},
   {2, A4, 1}
 };
+
+*/
+
+
+const double testArray[][3] =
+{
+  {1, E4, 1}
+  //{1, G4, 1}
+};
+
 
 const int NUM_EVENTS = sizeof(testArray) / sizeof(testArray[0]);
 
@@ -156,18 +170,37 @@ void loop()
     //Serial.println(posx);
   }
 
-  if (n >= NUM_EVENTS) return; // stop when done
+  //if (n >= NUM_EVENTS) return; // stop when done
+
 
   switch (motorState)
   {
     case READY:
       // Load next note
+
+      if (n >= NUM_EVENTS)
+      {
+        //Serial.println("done");
+        analogWrite(S1, OFF);
+        break;
+      }
+
+      //Serial.println("ready");
+      //analogWrite(S1, OFF);
       beats    = testArray[n][0];
       position = testArray[n][1];
       duty     = testArray[n][2];
-
       // Convert beats to time (ms)
       noteDuration = (60000 / BPM) * beats;
+
+      /*
+      if(n < NUM_EVENTS)
+      {
+      motorState = MOVING;
+      }
+      else
+      motorState = READY;
+      */
 
       motorState = MOVING;
       break;
@@ -175,23 +208,45 @@ void loop()
     case MOVING:
       // For now: instant move (no PID yet)
       //Serial.print("Moving to position: ");
-      //Serial.println(position); 
+      //Serial.println(position);
+      //Serial.println("move"); 
       target = position * 2; //in mm
+      analogWrite(S1, OFF);
 
-      motorState = PLAYING;
+      // Reset PID error terms for new target
+      eprev = 0;
+      eintegral = 0;
+
+      if(fabs(target - posx) < 1.5) motorState = PLAYING;
+      //else
+      //motorState = MOVING;
       break;
 
-    case PLAYING:
+    //case PLAYING:
       //Serial.println("Playing note");
 
-      analogWrite(S1, duty * 255);  // scale duty
+      //analogWrite(S1, ON);  // scale duty
+
+      //noteStartTime = millis();
+      //motorState = RESET;
+      //break;
+
+    case PLAYING:
+      //Serial.println("playing");
+      analogWrite(S1, PRESS);
+
+      //if (motorState != RESET) {
+      //noteStartTime = millis();
+      //}
 
       noteStartTime = millis();
+
       motorState = RESET;
       break;
-
+    
     case RESET:
       // Wait until note duration is done
+      //Serial.println("reset");
       if (millis() - noteStartTime >= noteDuration)
       {
         analogWrite(S1, 0); // turn off solenoid
@@ -200,6 +255,7 @@ void loop()
         n++; 
         motorState = READY;
       }
+      //motorState = READY;
       break;
   }
 }
@@ -240,7 +296,7 @@ float pid(float setpoint, float measurement, float dt)
 {
     e = setpoint - measurement;
 
-    if (fabs(e) < 1.5) e = 0;
+    if (fabs(e) < 0.5) e = 0;
 
     // --- Derivative ---
     static float dedtF = 0;
@@ -266,7 +322,6 @@ float pid(float setpoint, float measurement, float dt)
     // --- Deadband ---
     if (fabs(u) < 5) u = 0;
 
-    
     // --- Save state ---
     eprev = e;
 
