@@ -34,7 +34,7 @@ float eprev = 0.0;
 float eintegral = 0.0;
 float dedt = 0.0;
 float u = 0;
-float kp = 1.0; // Ajusta estos valores
+float kp = 2.0; // Ajusta estos valores
 float kd = 0.04;
 float ki = 0.005;
 float deltaT = 0.0;
@@ -52,6 +52,15 @@ float target = 0.0;
 #define OFF 0
 #define PRESS 255
 
+unsigned long pulseStartTime = 0;
+unsigned long noteStartTime  = 0;
+
+const unsigned long pulseWidth = 30; // ms
+
+bool pulseActive = false;
+bool pulseStarted = false;
+bool pulseDone = false;
+
 // Notes (position placeholders)
 #define A4 10
 #define B4 20
@@ -68,6 +77,7 @@ enum MOTOR_STATE
   READY,
   MOVING,
   PLAYING,
+  WAIT_NOTE,
   RESET
 };
 
@@ -113,7 +123,7 @@ double beats, position, duty;
 
 int n = 0;
 
-unsigned long noteStartTime = 0;
+//unsigned long noteStartTime = 0;
 unsigned long noteDuration = 0;
 
 void setup() 
@@ -125,6 +135,7 @@ void setup()
   pinMode(IN2, OUTPUT);
   ledcAttach(IN1, 5000, 8);
   ledcAttach(IN2, 5000, 8);
+  ledcAttach(S1, 5000, 8);
   prev_pos = readAngleDegrees(); // Inicializar posición
   pinMode(S1, OUTPUT);
   pinMode(S2, OUTPUT);
@@ -165,11 +176,8 @@ void loop()
 
   switch (motorState)
   {
-    case READY:
-      // Load next note
-
-      //eprev = 0; eintegral=0;
-
+    case READY: // Load next note
+      
       if (n >= NUM_EVENTS)
       {
         //Serial.println("done");
@@ -185,6 +193,14 @@ void loop()
       // Convert beats to time (ms)
       noteDuration = (60000 / BPM) * beats;
 
+      target = position;
+      eprev = 0; eintegral = 0;
+
+      pulseActive = false;
+      pulseStartTime = 0;
+      noteStartTime = 0;
+      pulseStarted = false;
+      pulseDone = false;
       motorState = MOVING;
       break;
 
@@ -192,15 +208,15 @@ void loop()
       // For now: instant move (no PID yet)
       //Serial.print("Moving to position: ");
       //Serial.println(position);
-      //Serial.println("move"); 
-      eprev = 0; eintegral = 0;
-      target = position; //in mm
+      Serial.println("move"); 
+      //eprev = 0; eintegral = 0;
+      //target = position; //in mm
       analogWrite(S1, OFF);
 
       // Reset PID error terms for new target
      
 
-      if(fabs(target - posx) < 1.5) motorState = PLAYING;
+      if(fabs(target - posx) < 2.5 || fabs(u) < 2.0) motorState = PLAYING;
       //else
       //motorState = MOVING;
       break;
@@ -215,32 +231,51 @@ void loop()
       //break;
 
     case PLAYING:
-      //Serial.println("playing");
-      analogWrite(S1, PRESS);
+    {
+    // Call it every loop
+    bool done = energizeSolenoid();
+    //Serial.print("play");
+    //energizeSolenoidD();
+    // When pulse is finished → move on
+    if (done)
+    {
+      noteStartTime = millis(); // start BPM timing AFTER strike
+      motorState = WAIT_NOTE;
+    }
 
-      //if (motorState != RESET) {
-      //noteStartTime = millis();
-      //}
+    else
+    motorState = PLAYING;
 
-      noteStartTime = millis();
+    break;
+    }
 
-      motorState = RESET;
-      break;
-    
+    case WAIT_NOTE:
+    {
+    if (millis() - noteStartTime >= noteDuration)
+    {
+      n++; motorState = READY;
+    }
+    break;
+    }
+
     case RESET:
       // Wait until note duration is done
-      //Serial.println("reset");
+      Serial.println("reset");
       if (millis() - noteStartTime >= noteDuration)
       {
         analogWrite(S1, 0); // turn off solenoid
         //Serial.println("Note done");
         //eprev = 0;
         //eintegral = 0;
-
         n++; 
         motorState = READY;
       }
-      //motorState = READY;
+      /*
+      else
+      {
+        ledcWrite(S1, PRESS);
+      }
+      */
       break;
   }
   }
@@ -312,4 +347,35 @@ float pid(float setpoint, float measurement, float dt)
     eprev = e;
 
     return u;
+}
+
+bool energizeSolenoid()
+{
+  static unsigned long startTime = 0;
+  static bool active = false;
+
+  // --- Start pulse ONCE ---
+  if (!active)
+  {
+    ledcWrite(S1, PRESS);
+    startTime = millis();
+    active = true;
+  }
+
+  // --- Keep running until time expires ---
+  if (millis() - startTime >= 50)
+  {
+    ledcWrite(S1, 0);   // turn OFF
+    active = false;
+    return true;        // ✅ finished → go back to FSM
+  }
+
+  return false;         // ⏳ still running
+}
+
+void energizeSolenoidD()
+{
+  ledcWrite(S1, PRESS);   // ON
+  delay(100);              // hold for 50 ms
+  ledcWrite(S1, 0);       // OFF
 }
